@@ -49,6 +49,8 @@
         function App() {
             const [courses, setCourses] = useState([]);
             const [isModalOpen, setIsModalOpen] = useState(false);
+            const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); // 新增：大量匯入彈窗狀態
+            const [bulkText, setBulkText] = useState(""); // 新增：大量匯入文字狀態
             const [editingCourse, setEditingCourse] = useState(null);
             const [dbLoading, setDbLoading] = useState(true);
             const [dbRef, setDbRef] = useState(null);
@@ -239,6 +241,45 @@
                 setEditingCourse(null);
             };
 
+            // 新增：處理 Excel 複製貼上的大量匯入邏輯
+            const handleBulkImport = async () => {
+                if (!bulkText.trim() || !dbRef) return;
+                setIsBulkModalOpen(false);
+                setDbLoading(true);
+                const { addDoc } = window.firebaseModules;
+                
+                // 將文字依照換行符號切割成每一筆資料
+                const lines = bulkText.split('\n').filter(line => line.trim() !== '');
+                let successCount = 0;
+
+                try {
+                    for (let i = 0; i < lines.length; i++) {
+                        // 支援 Tab (Excel 貼上的預設格式) 或逗號分隔
+                        const cols = lines[i].split(/\t|,/).map(c => c.trim());
+                        if (cols[0]) {
+                            await addDoc(dbRef, {
+                                title: cols[0] || "未命名課程",
+                                // 容錯機制：如果輸入的值不符合選項，自動帶入預設值
+                                category: CATEGORIES.includes(cols[1]) ? cols[1] : CATEGORIES[0],
+                                hours: HOURS.includes(cols[2]) ? cols[2] : HOURS[0],
+                                scope: SCOPES.some(s => s.name === cols[3]) ? cols[3] : SCOPES[0].name,
+                                instructor: INSTRUCTORS.includes(cols[4]) ? cols[4] : INSTRUCTORS[0],
+                                items: { 講義: false, 教案: false, 簡報: false, 評分表: false },
+                                createdAt: Date.now() + i // 確保匯入後的排序與 Excel 一致
+                            });
+                            successCount++;
+                        }
+                    }
+                    if (successCount > 0) {
+                        setBulkText(""); // 匯入成功後清空輸入框
+                    }
+                } catch (error) {
+                    console.error("批次匯入失敗:", error);
+                    setDbError("大量匯入過程中發生錯誤，請檢查資料格式或網路連線。");
+                }
+                setDbLoading(false);
+            };
+
             return (
                 <div className="w-full max-w-full mx-auto p-2 flex flex-col gap-2">
                     {/* Header - 緊湊排列 (改為淺色暖色系) */}
@@ -388,7 +429,7 @@
                                         })}
                                         {courses.length === 0 && (
                                             <tr>
-                                                <td colSpan="9" className="p-4 text-center text-slate-500 text-sm">目前沒有課程資料，請點擊右下方新增。</td>
+                                                <td colSpan="9" className="p-4 text-center text-slate-500 text-sm">目前沒有課程資料，請點擊右下方新增或匯入。</td>
                                             </tr>
                                         )}
                                     </tbody>
@@ -397,14 +438,52 @@
                         )}
                     </div>
 
-                    {/* 新增課程按鈕 - 移至表格下方最右側 */}
-                    <div className="flex justify-end">
+                    {/* 按鈕區塊 - 新增大量匯入功能 */}
+                    <div className="flex justify-end gap-2 mt-2">
+                        <button onClick={() => setIsBulkModalOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-md shadow-sm font-bold transition-all transform hover:-translate-y-0.5 flex items-center gap-1.5 text-xs border border-emerald-600">
+                            <i className="fas fa-file-excel"></i> Excel 大量匯入
+                        </button>
                         <button onClick={() => openModal()} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-md shadow-sm font-bold transition-all transform hover:-translate-y-0.5 flex items-center gap-1.5 text-xs border border-orange-600">
                             <i className="fas fa-plus"></i> 新增課程
                         </button>
                     </div>
 
-                    {/* Modal */}
+                    {/* 大量匯入專用 Modal */}
+                    {isBulkModalOpen && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-2 z-50">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-100">
+                                <div className="px-3 py-2 border-b border-emerald-100 flex justify-between items-center bg-gradient-to-r from-emerald-50 to-teal-50">
+                                    <h2 className="text-base font-bold text-emerald-900"><i className="fas fa-file-excel mr-2"></i>從 Excel 大量匯入</h2>
+                                    <button onClick={() => setIsBulkModalOpen(false)} className="text-slate-400 hover:text-red-500 bg-white rounded-full w-6 h-6 flex items-center justify-center shadow-sm border border-slate-200 transition-colors text-xs"><i className="fas fa-times"></i></button>
+                                </div>
+                                <div className="p-3">
+                                    <div className="mb-2 bg-yellow-50 p-2 rounded border border-yellow-200 text-xs text-yellow-800 leading-relaxed">
+                                        <strong>💡 操作方式：</strong>請直接在 Excel 中選取資料範圍並「複製」，然後在此處「貼上」。<br/>
+                                        資料請務必依照以下 <strong>5 個欄位順序</strong>排列（不含標題列）：<br/>
+                                        <div className="mt-1 flex flex-wrap gap-1">
+                                            <span className="font-mono bg-white px-1.5 py-0.5 border border-yellow-300 rounded text-yellow-900 shadow-sm">1.課目名稱</span>
+                                            <span className="font-mono bg-white px-1.5 py-0.5 border border-yellow-300 rounded text-yellow-900 shadow-sm">2.課程類別</span>
+                                            <span className="font-mono bg-white px-1.5 py-0.5 border border-yellow-300 rounded text-yellow-900 shadow-sm">3.時數</span>
+                                            <span className="font-mono bg-white px-1.5 py-0.5 border border-yellow-300 rounded text-yellow-900 shadow-sm">4.編修範圍</span>
+                                            <span className="font-mono bg-white px-1.5 py-0.5 border border-yellow-300 rounded text-yellow-900 shadow-sm">5.負責教官</span>
+                                        </div>
+                                    </div>
+                                    <textarea 
+                                        className="w-full h-48 border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono whitespace-pre bg-slate-50"
+                                        placeholder="請將 Excel 資料貼在這裡...&#10;例如：&#10;有線電設備介紹&#9;核心專業&#9;2hrs&#9;新編&#9;主任&#10;資訊安全規範&#9;通識教育&#9;4hrs&#9;小修&#9;翔瑋"
+                                        value={bulkText}
+                                        onChange={(e) => setBulkText(e.target.value)}
+                                    ></textarea>
+                                    <div className="mt-2 flex justify-end gap-2">
+                                        <button type="button" onClick={() => setIsBulkModalOpen(false)} className="px-3 py-1.5 text-xs border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50 transition-colors">取消</button>
+                                        <button type="button" onClick={handleBulkImport} disabled={!bulkText.trim()} className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-bold">開始匯入</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 單筆新增/修改 Modal */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-2 z-50">
                             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100">
